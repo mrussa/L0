@@ -1,0 +1,28 @@
+# Go build artifacts
+bin/
+/out/
+/build/
+/dist/
+*.exe
+*.test
+*.out
+coverage*.out
+
+# IDE / editors
+.idea/
+.vscode/
+*.iml
+
+# Env & secrets
+.env
+.env.*
+
+# Logs / temp
+*.log
+/tmp/
+logs/
+
+# Docker / data
+pgdata/
+docker-compose.override.yml
+*.local.yml
