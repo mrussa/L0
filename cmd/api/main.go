@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mrussa/L0/internal/config"
+	"github.com/mrussa/L0/internal/db"
 )
 
 func main() {
@@ -18,6 +19,19 @@ func main() {
 		log.Fatalf("[CFG] %v", err)
 	}
 	log.Printf("[CFG] http=%s dsn_present=%t cache_warm=%d", cfg.HTTPAddr, cfg.PostgresDSN != "", cfg.CacheWarmLimit)
+
+	startCtx := context.Background()
+	pool, err := db.NewPool(startCtx, cfg.PostgresDSN)
+	if err != nil {
+		log.Fatalf("[DB] new pool: %v", err)
+	}
+
+	if err := db.Ping(startCtx, pool); err != nil {
+		pool.Close()
+		log.Fatalf("[DB] ping: %v", err)
+	}
+	defer pool.Close()
+	log.Println("[DB] connected")
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
