@@ -142,3 +142,28 @@ func (r *OrdersRepo) GetOrder(ctx context.Context, uid string) (Order, error) {
 
 	return o, nil
 }
+
+func (r *OrdersRepo) ListRecentOrderUIDs(ctx context.Context, limit int) ([]string, error) {
+	ctxT, cancel := with2s(ctx)
+	defer cancel()
+
+	rows, err := r.Pool.Query(ctxT, `
+        SELECT order_uid
+        FROM orders
+        ORDER BY date_created DESC
+        LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	uids := make([]string, 0, limit)
+	for rows.Next() {
+		var uid string
+		if err := rows.Scan(&uid); err != nil {
+			return nil, err
+		}
+		uids = append(uids, uid)
+	}
+	return uids, rows.Err()
+}
