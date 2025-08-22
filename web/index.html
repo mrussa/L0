@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>L0 — Orders Viewer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root{
+      --bg:#0b0c10; --panel:#151820; --text:#e6ebf2; --muted:#9aa4b2;
+      --primary:#6aa0ff; --danger:#ff6b6b; --ok:#4cd37b; --border:#222734;
+      --inputbg:#0f1218; --codebg:#0e1117; --shadow:0 10px 30px rgba(0,0,0,.35);
+      --radius:14px;
+    }
+    @media (prefers-color-scheme: light){
+      :root{
+        --bg:#f6f7fb; --panel:#fff; --text:#12161f; --muted:#566074;
+        --primary:#2f6fff; --danger:#e65054; --ok:#1ea86b; --border:#eaeef5;
+        --inputbg:#f2f5fb; --codebg:#f7f9ff; --shadow:0 10px 30px rgba(0,0,0,.08);
+      }
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Arial;
+      color:var(--text);
+      background:
+        radial-gradient(1200px 600px at 80% -10%, rgba(88,135,255,.12), transparent 50%),
+        radial-gradient(1000px 700px at -10% 110%, rgba(102,204,153,.12), transparent 50%),
+        var(--bg);
+      min-height:100%;
+      display:flex; justify-content:center; align-items:flex-start;
+      padding:28px 16px;
+    }
+
+    .card{ width:min(980px,100%); background:var(--panel); border:1px solid var(--border);
+           border-radius:var(--radius); box-shadow:var(--shadow); overflow:visible }
+    .card__head{ padding:18px 22px; display:flex; align-items:center; gap:16px; border-bottom:1px solid var(--border)}
+    .brand{ font-weight:700; display:flex; align-items:center; gap:10px }
+    .brand__dot{ width:10px; height:10px; border-radius:50%; background:var(--primary) }
+    .row{ display:flex; gap:10px; flex-wrap:wrap; width:100% }
+    .grow{ flex:1 1 260px }
+    .input{
+      appearance:none; border:1px solid var(--border); background:var(--inputbg);
+      color:var(--text); border-radius:12px; padding:12px 14px; width:100%; outline:none;
+      transition:.15s border-color ease;
+    }
+    .input::placeholder{color:var(--muted)}
+    .input:focus{ border-color:var(--primary) }
+    input:-webkit-autofill,
+    input:-webkit-autofill:hover,
+    input:-webkit-autofill:focus{
+      -webkit-text-fill-color: var(--text);
+      -webkit-box-shadow: 0 0 0px 1000px var(--inputbg) inset;
+      box-shadow: 0 0 0px 1000px var(--inputbg) inset;
+      transition: background-color 99999s ease-in-out 0s;
+      caret-color: var(--text);
+    }
+
+    .btn{ border:0; padding:12px 16px; border-radius:12px; font-weight:600; cursor:pointer; display:inline-flex; gap:10px; align-items:center }
+    .btn--primary{ background:var(--primary); color:#fff }
+    .btn--ghost{ background:transparent; color:var(--muted); border:1px solid var(--border) }
+    .btn:disabled{ opacity:.6; cursor:not-allowed }
+    .card__body{ padding:18px 22px; display:grid; gap:14px }
+    .tools{ display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap }
+    .alert{ padding:12px 14px; border-radius:12px; border:1px solid var(--border);
+            background:rgba(255,107,107,.12); color:#ff9b9b; display:none }
+    .alert--show{ display:block }
+    .view-switch{ display:flex; gap:8px }
+    .view-switch .btn{ padding:8px 12px }
+    .active{ outline:2px solid var(--primary) }
+
+    pre{ margin:0; border-radius:12px; overflow:auto; background:var(--codebg); border:1px solid var(--border) }
+    pre code{ display:block; padding:18px; white-space:pre; word-wrap:normal; font:13px/1.6 ui-monospace,Menlo,Consolas,"Liberation Mono",monospace; tab-size:2; }
+
+    .sections{ display:grid; gap:14px }
+    .section{ border:1px solid var(--border); border-radius:12px; overflow:hidden }
+    .section__head{ padding:10px 14px; font-weight:700; border-bottom:1px solid var(--border) }
+    .section__body{ padding:0; overflow:auto; }
+
+    table{ width:100%; border-collapse:collapse; border:0; }
+    thead th{ background:var(--inputbg); color:var(--muted); font-weight:700 }
+    th,td{ padding:10px 12px; border-bottom:1px solid var(--border); text-align:left; font-size:14px; vertical-align:top }
+    tr:last-child td{ border-bottom:0 }
+
+    .loader{ width:18px;height:18px;border-radius:50%;
+             border:3px solid rgba(106,160,255,.3); border-top-color:var(--primary);
+             display:none; animation:spin .8s linear infinite }
+    .loader--show{ display:inline-block }
+    @keyframes spin{ to { transform:rotate(360deg) } }
+  </style>
+</head>
+<body>
+  <div class="card" role="region" aria-label="Orders viewer">
+    <div class="card__head">
+      <div class="brand"><span class="brand__dot" aria-hidden="true"></span> L0 Orders</div>
+      <div class="row">
+        <input id="orderId" class="input grow" placeholder="Enter order_uid (e.g., b563feb7b2b84b6test)" aria-label="order_uid" autocomplete="off" autocapitalize="off" spellcheck="false" />
+        <button id="btnFind" class="btn btn--primary"><span class="loader" id="loader" aria-hidden="true"></span> Find</button>
+        <button id="btnClear" class="btn btn--ghost" title="Clear">Clear</button>
+      </div>
+    </div>
+
+    <div class="card__body">
+      <div id="err" class="alert" role="alert"></div>
+
+      <div class="tools">
+        <div class="view-switch">
+          <button id="btnViewPretty" class="btn btn--ghost active">Card</button>
+          <button id="btnViewJson"   class="btn btn--ghost">JSON</button>
+        </div>
+        <div style="display:flex; gap:10px; align-items:center;">
+          <button id="btnCopy" class="btn btn--ghost" title="Copy JSON">Copy JSON</button>
+        </div>
+      </div>
+
+      <div id="pretty" class="sections" style="">
+        <div class="section">
+          <div class="section__head">Order</div>
+          <div class="section__body" id="kv-order"></div>
+        </div>
+        <div class="section">
+          <div class="section__head">Delivery</div>
+          <div class="section__body" id="kv-delivery"></div>
+        </div>
+        <div class="section">
+          <div class="section__head">Payment</div>
+          <div class="section__body" id="kv-payment"></div>
+        </div>
+        <div class="section">
+          <div class="section__head">Items</div>
+          <div class="section__body" id="items-wrap"></div>
+        </div>
+      </div>
+
+      <div id="jsonBox" style="display:none;">
+        <pre><code id="out">{ /* result will appear here */ }</code></pre>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const $ = s => document.querySelector(s);
+    const input = $('#orderId');
+    const btnFind = $('#btnFind');
+    const btnClear = $('#btnClear');
+    const btnCopy = $('#btnCopy');
+    const out = $('#out');
+    const jsonBox = $('#jsonBox');
+    const errBox = $('#err');
+    const loader = $('#loader');
+
+    const pretty = $('#pretty');
+    const kvOrder = $('#kv-order');
+    const kvDelivery = $('#kv-delivery');
+    const kvPayment = $('#kv-payment');
+    const itemsWrap = $('#items-wrap');
+
+    const btnViewPretty = $('#btnViewPretty');
+    const btnViewJson   = $('#btnViewJson');
+
+    function setLoading(on){
+      btnFind.disabled = on;
+      loader.classList.toggle('loader--show', on);
+    }
+    function showError(msg){
+      errBox.textContent = msg || '';
+      errBox.classList.toggle('alert--show', !!msg);
+      if (msg) out.textContent = '';
+    }
+    function showJSON(obj){
+      out.textContent = JSON.stringify(obj, null, 2);
+    }
+    function fmt(v){
+      return (v === null || v === undefined || v === '') ? '—' : String(v);
+    }
+    function setActiveView(view){
+      const json = view === 'json';
+      btnViewPretty.classList.toggle('active', !json);
+      btnViewJson.classList.toggle('active', json);
+      pretty.style.display  = json ? 'none' : '';
+      jsonBox.style.display = json ? '' : 'none';
+    }
+    btnViewPretty.addEventListener('click', ()=> setActiveView('pretty'));
+    btnViewJson.addEventListener('click',   ()=> setActiveView('json'));
+
+    function renderRowTable(container, columns, source){
+      const table = document.createElement('table');
+      const thead = document.createElement('thead');
+      const trHead = document.createElement('tr');
+      for (const col of columns){
+        const th = document.createElement('th');
+        th.textContent = col;
+        trHead.appendChild(th);
+      }
+      thead.appendChild(trHead);
+      table.appendChild(thead);
+      const tbody = document.createElement('tbody');
+      const tr = document.createElement('tr');
+      for (const col of columns){
+        const td = document.createElement('td');
+        td.textContent = fmt(source?.[col]);
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+      table.appendChild(tbody);
+      container.innerHTML = '';
+      container.appendChild(table);
+    }
+
+    function renderItems(items){
+      const cols = ['chrt_id','track_number','price','rid','name','sale','size','total_price','nm_id','brand','status'];
+      const table = document.createElement('table');
+      const thead = document.createElement('thead');
+      const trh = document.createElement('tr');
+      for (const c of cols){
+        const th = document.createElement('th');
+        th.textContent = c;
+        trh.appendChild(th);
+      }
+      thead.appendChild(trh);
+      table.appendChild(thead);
+      const tbody = document.createElement('tbody');
+      for (const it of (items || [])){
+        const tr = document.createElement('tr');
+        for (const c of cols){
+          const td = document.createElement('td');
+          td.textContent = fmt(it?.[c]);
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      itemsWrap.innerHTML = '';
+      itemsWrap.appendChild(table);
+    }
+
+    function renderPretty(o){
+      renderRowTable(kvOrder, [
+        'order_uid','track_number','entry','locale','internal_signature',
+        'customer_id','delivery_service','shardkey','sm_id','date_created','oof_shard'
+      ], o);
+      renderRowTable(kvDelivery, [
+        'name','phone','zip','city','address','region','email'
+      ], o.delivery || {});
+      renderRowTable(kvPayment, [
+        'transaction','request_id','currency','provider',
+        'amount','payment_dt','bank','delivery_cost','goods_total','custom_fee'
+      ], o.payment || {});
+      renderItems(o.items || []);
+    }
+
+    async function findOrder(){
+      const id = input.value.trim();
+      if (!id){ showError('Enter order_uid'); return; }
+      setLoading(true); showError('');
+      try{
+        const r = await fetch('/order/' + encodeURIComponent(id));
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok){
+          showError(data?.error || 'Error');
+        }else{
+          showJSON(data);
+          renderPretty(data);
+        }
+      }catch{
+        showError('Network/server error');
+      }finally{
+        setLoading(false);
+      }
+    }
+
+    function clearAll(){
+      input.value = '';
+      showError('');
+      out.textContent = '{ /* result will appear here */ }';
+      kvOrder.innerHTML = kvDelivery.innerHTML = kvPayment.innerHTML = itemsWrap.innerHTML = '';
+      input.focus();
+    }
+
+    btnFind.addEventListener('click', findOrder);
+    btnClear.addEventListener('click', clearAll);
+    btnCopy.addEventListener('click', async () => {
+      const text = out.textContent.trim();
+      if (!text) return;
+      try{
+        await navigator.clipboard.writeText(text);
+        btnCopy.textContent = 'Copied ✓';
+      }catch{
+        btnCopy.textContent = 'Failed :(';
+      }finally{
+        setTimeout(()=> btnCopy.textContent = 'Copy JSON', 1100);
+      }
+    });
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') findOrder(); });
+
+    document.addEventListener('DOMContentLoaded', () => { input.value = ''; });
+    setActiveView('pretty');
+  </script>
+</body>
+</html>

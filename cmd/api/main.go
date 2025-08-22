@@ -80,6 +80,8 @@ func main() {
 
 	mux := http.NewServeMux()
 
+	mux.Handle("/", http.FileServer(http.Dir("web")))
+
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status":     "ok",
