@@ -15,7 +15,6 @@ coverage*.out
 
 # Env & secrets
 .env
-.env.*
 
 # Logs / temp
 *.log

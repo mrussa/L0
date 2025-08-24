@@ -2,34 +2,52 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/mrussa/L0/internal/cache"
 	"github.com/mrussa/L0/internal/config"
 	"github.com/mrussa/L0/internal/db"
+	"github.com/mrussa/L0/internal/httpapi"
+	"github.com/mrussa/L0/internal/kafka"
 	"github.com/mrussa/L0/internal/repo"
 )
 
-type httpError struct {
-	Error string `json:"error"`
-}
+var version = "dev"
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
+func warmCache(ctx context.Context, r *repo.OrdersRepo, c *cache.OrdersCache, limit int, logf func(string, ...any)) {
+	if limit <= 0 {
+		return
+	}
 
-func writeErr(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, httpError{Error: msg})
+	ctxList, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	uids, err := r.ListRecentOrderUIDs(ctxList, limit)
+	if err != nil {
+		logf("[CACHE] warm list: %v", err)
+		return
+	}
+
+	ok, failed := 0, 0
+	for _, uid := range uids {
+		ctxOne, cancelOne := context.WithTimeout(ctx, 2*time.Second)
+		o, err := r.GetOrder(ctxOne, uid)
+		cancelOne()
+		if err != nil {
+			failed++
+			logf("[CACHE] warm %s: %v", uid, err)
+			continue
+		}
+		c.Set(uid, o)
+		ok++
+	}
+	logf("[CACHE] warmed: %d ok, %d failed, size=%d", ok, failed, c.Len())
 }
 
 func main() {
@@ -37,15 +55,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("[CFG] %v", err)
 	}
+	log.Printf("[APP] version=%s", version)
 	log.Printf("[CFG] http=%s dsn_present=%t cache_warm=%d", cfg.HTTPAddr, cfg.PostgresDSN != "", cfg.CacheWarmLimit)
+	log.Printf("[KAFKA] brokers=%s topic=%s group=%s", cfg.KafkaBrokers, cfg.KafkaTopic, cfg.KafkaGroup)
 
-	startCtx := context.Background()
-	pool, err := db.NewPool(startCtx, cfg.PostgresDSN)
+	rootCtx := context.Background()
+
+	pool, err := db.NewPool(rootCtx, cfg.PostgresDSN)
 	if err != nil {
 		log.Fatalf("[DB] new pool: %v", err)
 	}
-
-	if err := db.Ping(startCtx, pool); err != nil {
+	if err := db.Ping(rootCtx, pool); err != nil {
 		pool.Close()
 		log.Fatalf("[DB] ping: %v", err)
 	}
@@ -55,87 +75,12 @@ func main() {
 	rpo := repo.NewOrdersRepo(pool)
 	c := cache.New()
 
-	warmCtx, cancel := context.WithTimeout(startCtx, 15*time.Second)
-	defer cancel()
+	warmCache(rootCtx, rpo, c, cfg.CacheWarmLimit, log.Printf)
 
-	if cfg.CacheWarmLimit > 0 {
-		uids, err := rpo.ListRecentOrderUIDs(warmCtx, cfg.CacheWarmLimit)
-		if err != nil {
-			log.Printf("[CACHE] warm list: %v", err)
-		} else {
-			ok, failed := 0, 0
-			for _, uid := range uids {
-				o, err := rpo.GetOrder(warmCtx, uid)
-				if err != nil {
-					failed++
-					log.Printf("[CACHE] warm %s: %v", uid, err)
-					continue
-				}
-				c.Set(uid, o)
-				ok++
-			}
-			log.Printf("[CACHE] warmed: %d ok, %d failed, size=%d", ok, failed, c.Len())
-		}
-	}
-
-	mux := http.NewServeMux()
-
-	mux.Handle("/", http.FileServer(http.Dir("web")))
-
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"status":     "ok",
-			"cache_size": c.Len(),
-		})
-	})
-
-	mux.HandleFunc("/order", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
-			return
-		}
-		writeErr(w, http.StatusBadRequest, "use /order/{order_uid}")
-	})
-
-	mux.HandleFunc("/order/", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
-			return
-		}
-		id := strings.TrimPrefix(r.URL.Path, "/order/")
-		if id == "" || len(id) > 100 {
-			writeErr(w, http.StatusBadRequest, "bad order_uid")
-			return
-		}
-
-		if o, ok := c.Get(id); ok {
-			log.Printf("[CACHE] hit %s", id)
-			writeJSON(w, http.StatusOK, o)
-			return
-		}
-		log.Printf("[CACHE] miss %s", id)
-
-		o, err := rpo.GetOrder(r.Context(), id)
-		if err != nil {
-			switch {
-			case errors.Is(err, repo.ErrBadUID):
-				writeErr(w, http.StatusBadRequest, "bad order_uid")
-			case errors.Is(err, repo.ErrNotFound):
-				writeErr(w, http.StatusNotFound, "not found")
-			default:
-				log.Printf("[HTTP] /order/%s: %v", id, err)
-				writeErr(w, http.StatusInternalServerError, "internal")
-			}
-			return
-		}
-
-		c.Set(id, o)
-		writeJSON(w, http.StatusOK, o)
-	})
-
+	api := httpapi.New(rpo, c, log.Printf, version)
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           mux,
+		Handler:           api.Routes(),
 		ReadHeaderTimeout: 5 * time.Second,
 		WriteTimeout:      10 * time.Second,
 		IdleTimeout:       60 * time.Second,
@@ -144,7 +89,18 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	var wg sync.WaitGroup
+
+	cons := kafka.NewConsumer(cfg.KafkaBrokers, cfg.KafkaTopic, cfg.KafkaGroup, rpo, c, log.Printf)
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
+		_ = cons.Run(ctx)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
 		log.Printf("[HTTP] listening on %s", cfg.HTTPAddr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("[HTTP] %v", err)
@@ -152,11 +108,14 @@ func main() {
 	}()
 
 	<-ctx.Done()
+
 	log.Printf("[HTTP] shutting down...")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("[HTTP] shutdown error: %v", err)
 	}
+
+	wg.Wait()
 	log.Printf("[HTTP] bye")
 }

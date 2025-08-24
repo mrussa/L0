@@ -6,13 +6,15 @@ import (
 	"github.com/mrussa/L0/internal/repo"
 )
 
+const defaultCap = 256
+
 type OrdersCache struct {
 	mu sync.RWMutex
 	m  map[string]repo.Order
 }
 
 func New() *OrdersCache {
-	return &OrdersCache{m: make(map[string]repo.Order, 256)}
+	return &OrdersCache{m: make(map[string]repo.Order, defaultCap)}
 }
 
 func (c *OrdersCache) Get(uid string) (repo.Order, bool) {

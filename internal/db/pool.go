@@ -7,18 +7,28 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+const (
+	maxConnections    = 20
+	minConnections    = 0
+	maxConnIdleTime   = 2 * time.Minute
+	maxConnLifetime   = 45 * time.Minute
+	connectionTimeout = 3 * time.Second
+)
+
+var newPoolWithConfig = pgxpool.NewWithConfig
+
 func NewPool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.MaxConns = 20
-	cfg.MinConns = 0
-	cfg.MaxConnIdleTime = 2 * time.Minute
-	cfg.MaxConnLifetime = 45 * time.Minute
+	cfg.MaxConns = maxConnections
+	cfg.MinConns = minConnections
+	cfg.MaxConnIdleTime = maxConnIdleTime
+	cfg.MaxConnLifetime = maxConnLifetime
 
-	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	pool, err := newPoolWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -28,7 +38,7 @@ func NewPool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 }
 
 func Ping(parent context.Context, pool *pgxpool.Pool) error {
-	ctx, cancel := context.WithTimeout(parent, 3*time.Second)
+	ctx, cancel := context.WithTimeout(parent, connectionTimeout)
 	defer cancel()
 	return pool.Ping(ctx)
 }
