@@ -15,6 +15,7 @@
 - [Makefile — шпаргалка](#makefile--шпаргалка)
 - [Структура проекта](#структура-проекта)
 - [Траблшутинг](#траблшутинг)
+- [Демо (видео)](#демо-видео)
 
 ---
 
@@ -307,3 +308,19 @@ Makefile                 # команды для разработки
 - **Хочется версионировать билд**  
   Переменная `version` в `main.go` задаётся через ldflags:  
   `go run -ldflags "-X main.version=1.2.3" ./cmd/api`
+## Демо (видео)
+### Сервис
+
+
+https://github.com/user-attachments/assets/68f25590-158a-470c-8d44-c55428cc2d02
+
+
+
+### Тесты и покрытие
+
+
+
+https://github.com/user-attachments/assets/279c366e-57ab-410a-bcf8-c135f855a4ab
+
+
+
