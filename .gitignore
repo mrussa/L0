@@ -25,3 +25,6 @@ logs/
 pgdata/
 docker-compose.override.yml
 *.local.yml
+
+# macOS
+.DS_Store
